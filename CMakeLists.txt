@@ -36,7 +36,7 @@ if(USEPCRE)
   list(APPEND EXTRA_TARGET_LINK_LIBRARIES pcre)
 endif()
 
-include_directories(${CMAKE_SOURCE_DIR})
+include_directories(${CMAKE_CURRENT_LIST_DIR})
 
 set(RE2_LIBRARY_SOURCES
     re2/bitstate.cc
@@ -82,8 +82,8 @@ set(TEST_LIBRARY_SOURCES
     util/${THREADING}.cc
     )
 
-add_library(test STATIC ${TEST_LIBRARY_SOURCES} util/test.cc)
-add_library(benchmark STATIC ${TEST_LIBRARY_SOURCES} util/benchmark.cc)
+#add_library(test STATIC ${TEST_LIBRARY_SOURCES} util/test.cc)
+#add_library(benchmark STATIC ${TEST_LIBRARY_SOURCES} util/benchmark.cc)
 
 set(TEST_TARGETS
     charclass_test
@@ -113,12 +113,12 @@ set(BENCHMARK_TARGETS
     regexp_benchmark
     )
 
-foreach(target ${TEST_TARGETS})
-  add_executable(${target} re2/testing/${target}.cc)
-  target_link_libraries(${target} test re2 ${EXTRA_TARGET_LINK_LIBRARIES})
-endforeach(target)
+#foreach(target ${TEST_TARGETS})
+#  add_executable(${target} re2/testing/${target}.cc)
+#  target_link_libraries(${target} test re2 ${EXTRA_TARGET_LINK_LIBRARIES})
+#endforeach(target)
 
-foreach(target ${BENCHMARK_TARGETS})
-  add_executable(${target} re2/testing/${target}.cc)
-  target_link_libraries(${target} benchmark re2 ${EXTRA_TARGET_LINK_LIBRARIES})
-endforeach(target)
+#foreach(target ${BENCHMARK_TARGETS})
+#  add_executable(${target} re2/testing/${target}.cc)
+#  target_link_libraries(${target} benchmark re2 ${EXTRA_TARGET_LINK_LIBRARIES})
+#endforeach(target)

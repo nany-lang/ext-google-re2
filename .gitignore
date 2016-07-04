@@ -9,3 +9,7 @@ cmake_install.cmake
 *.a
 *.so
 *.dll
+
+
+# nany
+/Makefile

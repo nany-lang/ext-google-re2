@@ -962,6 +962,13 @@ bool RE2::Arg::parse_char(const char* str, int n, void* dest) {
   return true;
 }
 
+bool RE2::Arg::parse_schar(const char* str, int n, void* dest) {
+  if (n != 1) return false;
+  if (dest == NULL) return true;
+  *(reinterpret_cast<signed char*>(dest)) = str[0];
+  return true;
+}
+
 bool RE2::Arg::parse_uchar(const char* str, int n, void* dest) {
   if (n != 1) return false;
   if (dest == NULL) return true;
@@ -1074,8 +1081,8 @@ bool RE2::Arg::parse_short_radix(const char* str,
                                 void* dest,
                                 int radix) {
   long r;
-  if (!parse_long_radix(str, n, &r, radix)) return false; // Could not parse
-  if ((short)r != r) return false;       // Out of range
+  if (!parse_long_radix(str, n, &r, radix)) return false;  // Could not parse
+  if ((short)r != r) return false;                         // Out of range
   if (dest == NULL) return true;
   *(reinterpret_cast<short*>(dest)) = (short)r;
   return true;
@@ -1086,10 +1093,10 @@ bool RE2::Arg::parse_ushort_radix(const char* str,
                                  void* dest,
                                  int radix) {
   unsigned long r;
-  if (!parse_ulong_radix(str, n, &r, radix)) return false; // Could not parse
-  if ((ushort)r != r) return false;                      // Out of range
+  if (!parse_ulong_radix(str, n, &r, radix)) return false;  // Could not parse
+  if ((unsigned short)r != r) return false;                 // Out of range
   if (dest == NULL) return true;
-  *(reinterpret_cast<unsigned short*>(dest)) = (ushort)r;
+  *(reinterpret_cast<unsigned short*>(dest)) = (unsigned short)r;
   return true;
 }
 
@@ -1098,10 +1105,10 @@ bool RE2::Arg::parse_int_radix(const char* str,
                               void* dest,
                               int radix) {
   long r;
-  if (!parse_long_radix(str, n, &r, radix)) return false; // Could not parse
-  if ((int)r != r) return false;         // Out of range
+  if (!parse_long_radix(str, n, &r, radix)) return false;  // Could not parse
+  if ((int)r != r) return false;                           // Out of range
   if (dest == NULL) return true;
-  *(reinterpret_cast<int*>(dest)) = r;
+  *(reinterpret_cast<int*>(dest)) = (int)r;
   return true;
 }
 
@@ -1110,14 +1117,13 @@ bool RE2::Arg::parse_uint_radix(const char* str,
                                void* dest,
                                int radix) {
   unsigned long r;
-  if (!parse_ulong_radix(str, n, &r, radix)) return false; // Could not parse
-  if ((uint)r != r) return false;                       // Out of range
+  if (!parse_ulong_radix(str, n, &r, radix)) return false;  // Could not parse
+  if ((unsigned int)r != r) return false;                   // Out of range
   if (dest == NULL) return true;
-  *(reinterpret_cast<unsigned int*>(dest)) = r;
+  *(reinterpret_cast<unsigned int*>(dest)) = (unsigned int)r;
   return true;
 }
 
-#if RE2_HAVE_LONGLONG
 bool RE2::Arg::parse_longlong_radix(const char* str,
                                    int n,
                                    void* dest,
@@ -1156,7 +1162,6 @@ bool RE2::Arg::parse_ulonglong_radix(const char* str,
   *(reinterpret_cast<uint64*>(dest)) = r;
   return true;
 }
-#endif
 
 static bool parse_double_float(const char* str, int n, bool isfloat, void *dest) {
   if (n == 0) return false;
@@ -1190,30 +1195,29 @@ bool RE2::Arg::parse_float(const char* str, int n, void* dest) {
   return parse_double_float(str, n, true, dest);
 }
 
-
-#define DEFINE_INTEGER_PARSERS(name)                                        \
+#define DEFINE_INTEGER_PARSER(name)                                          \
   bool RE2::Arg::parse_##name(const char* str, int n, void* dest) {          \
-    return parse_##name##_radix(str, n, dest, 10);                          \
-  }                                                                         \
+    return parse_##name##_radix(str, n, dest, 10);                           \
+  }                                                                          \
   bool RE2::Arg::parse_##name##_hex(const char* str, int n, void* dest) {    \
-    return parse_##name##_radix(str, n, dest, 16);                          \
-  }                                                                         \
+    return parse_##name##_radix(str, n, dest, 16);                           \
+  }                                                                          \
   bool RE2::Arg::parse_##name##_octal(const char* str, int n, void* dest) {  \
-    return parse_##name##_radix(str, n, dest, 8);                           \
-  }                                                                         \
+    return parse_##name##_radix(str, n, dest, 8);                            \
+  }                                                                          \
   bool RE2::Arg::parse_##name##_cradix(const char* str, int n, void* dest) { \
-    return parse_##name##_radix(str, n, dest, 0);                           \
+    return parse_##name##_radix(str, n, dest, 0);                            \
   }
 
-DEFINE_INTEGER_PARSERS(short);
-DEFINE_INTEGER_PARSERS(ushort);
-DEFINE_INTEGER_PARSERS(int);
-DEFINE_INTEGER_PARSERS(uint);
-DEFINE_INTEGER_PARSERS(long);
-DEFINE_INTEGER_PARSERS(ulong);
-DEFINE_INTEGER_PARSERS(longlong);
-DEFINE_INTEGER_PARSERS(ulonglong);
+DEFINE_INTEGER_PARSER(short);
+DEFINE_INTEGER_PARSER(ushort);
+DEFINE_INTEGER_PARSER(int);
+DEFINE_INTEGER_PARSER(uint);
+DEFINE_INTEGER_PARSER(long);
+DEFINE_INTEGER_PARSER(ulong);
+DEFINE_INTEGER_PARSER(longlong);
+DEFINE_INTEGER_PARSER(ulonglong);
 
-#undef DEFINE_INTEGER_PARSERS
+#undef DEFINE_INTEGER_PARSER
 
 }  // namespace re2

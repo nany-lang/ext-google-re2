@@ -101,7 +101,7 @@ class DFA {
     uint flag_;         // Empty string bitfield flags in effect on the way
                         // into this state, along with kFlagMatch if this
                         // is a matching state.
-    std::atomic<State*> next_[1];    // Outgoing arrows from State,
+    std::atomic<State*> next_[];    // Outgoing arrows from State,
                         // one per input byte class
   };
 
@@ -114,8 +114,19 @@ class DFA {
     kFlagNeedShift = 16,        // needed kEmpty bits are or'ed in shifted left
   };
 
-#ifndef STL_MSVC
-  // STL function structures for use with unordered_set.
+  struct StateHash {
+    size_t operator()(const State* a) const {
+      if (a == NULL)
+        return 0;
+      const char* s = reinterpret_cast<const char*>(a->inst_);
+      int len = a->ninst_ * sizeof a->inst_[0];
+      if (sizeof(size_t) == sizeof(uint32))
+        return static_cast<size_t>(Hash32StringWithSeed(s, len, a->flag_));
+      else
+        return static_cast<size_t>(Hash64StringWithSeed(s, len, a->flag_));
+    }
+  };
+
   struct StateEqual {
     bool operator()(const State* a, const State* b) const {
       if (a == b)
@@ -132,47 +143,8 @@ class DFA {
       return true;  // they're equal
     }
   };
-#endif  // STL_MSVC
-  struct StateHash {
-    size_t operator()(const State* a) const {
-      if (a == NULL)
-        return 0;
-      const char* s = reinterpret_cast<const char*>(a->inst_);
-      int len = a->ninst_ * sizeof a->inst_[0];
-      if (sizeof(size_t) == sizeof(uint32))
-        return Hash32StringWithSeed(s, len, a->flag_);
-      else
-        return static_cast<size_t>(Hash64StringWithSeed(s, len, a->flag_));
-    }
-#ifdef STL_MSVC
-    // Less than operator.
-    bool operator()(const State* a, const State* b) const {
-      if (a == b)
-        return false;
-      if (a == NULL || b == NULL)
-        return a == NULL;
-      if (a->ninst_ != b->ninst_)
-        return a->ninst_ < b->ninst_;
-      if (a->flag_ != b->flag_)
-        return a->flag_ < b->flag_;
-      for (int i = 0; i < a->ninst_; ++i)
-        if (a->inst_[i] != b->inst_[i])
-          return a->inst_[i] < b->inst_[i];
-      return false;  // they're equal
-    }
-    // The two public members are required by msvc. 4 and 8 are default values.
-    // Reference: http://msdn.microsoft.com/en-us/library/1s1byw77.aspx
-    static const size_t bucket_size = 4;
-    static const size_t min_buckets = 8;
-#endif  // STL_MSVC
-  };
 
-#ifdef STL_MSVC
-  typedef unordered_set<State*, StateHash> StateSet;
-#else  // !STL_MSVC
   typedef unordered_set<State*, StateHash, StateEqual> StateSet;
-#endif  // STL_MSVC
-
 
  private:
   // Special "firstbyte" values for a state.  (Values >= 0 denote actual bytes.)
@@ -469,7 +441,7 @@ DFA::DFA(Prog* prog, Prog::MatchKind kind, int64 max_mem)
   // Note that a state stores list heads only, so we use the program
   // list count for the upper bound, not the program size.
   int nnext = prog_->bytemap_range() + 1;  // + 1 for kByteEndText slot
-  int64 one_state = sizeof(State) + (nnext-1)*sizeof(std::atomic<State*>) +
+  int64 one_state = sizeof(State) + nnext*sizeof(std::atomic<State*>) +
                     (prog_->list_count()+nmark)*sizeof(int);
   if (state_budget_ < 20*one_state) {
     LOG(INFO) << StringPrintf("DFA out of memory: prog size %d mem %lld",
@@ -645,7 +617,7 @@ DFA::State* DFA::WorkqToCachedState(Workq* q, uint flag) {
             fprintf(stderr, " -> FullMatchState\n");
           return FullMatchState;
         }
-        // Fall through.
+        FALLTHROUGH_INTENDED;
       default:
         // Record iff id is the head of its list, which must
         // be the case if id-1 is the last of *its* list. :)
@@ -726,7 +698,12 @@ DFA::State* DFA::CachedState(int* inst, int ninst, uint flag) {
     mutex_.AssertHeld();
 
   // Look in the cache for a pre-existing state.
-  State state = {inst, ninst, flag};
+  // We have to initialise the struct like this because otherwise
+  // MSVC will complain about the flexible array member. :(
+  State state;
+  state.inst_ = inst;
+  state.ninst_ = ninst;
+  state.flag_ = flag;
   StateSet::iterator it = state_cache_.find(&state);
   if (it != state_cache_.end()) {
     if (DebugDFA)
@@ -740,7 +717,7 @@ DFA::State* DFA::CachedState(int* inst, int ninst, uint flag) {
   // State*, empirically.
   const int kStateCacheOverhead = 32;
   int nnext = prog_->bytemap_range() + 1;  // + 1 for kByteEndText slot
-  int mem = sizeof(State) + (nnext-1)*sizeof(std::atomic<State*>) +
+  int mem = sizeof(State) + nnext*sizeof(std::atomic<State*>) +
             ninst*sizeof(int);
   if (mem_budget_ < mem + kStateCacheOverhead) {
     mem_budget_ = -1;
@@ -770,16 +747,15 @@ DFA::State* DFA::CachedState(int* inst, int ninst, uint flag) {
 
 // Clear the cache.  Must hold cache_mutex_.w or be in destructor.
 void DFA::ClearCache() {
-  // In case state_cache_ doesn't support deleting entries
-  // during iteration, copy into a vector and then delete.
-  vector<State*> v;
-  v.reserve(state_cache_.size());
-  for (StateSet::iterator it = state_cache_.begin();
-       it != state_cache_.end(); ++it)
-    v.push_back(*it);
+  StateSet::iterator begin = state_cache_.begin();
+  StateSet::iterator end = state_cache_.end();
+  while (begin != end) {
+    StateSet::iterator tmp = begin;
+    ++begin;
+    // Deallocate the blob of memory that we allocated in DFA::CachedState().
+    delete[] reinterpret_cast<const char*>(*tmp);
+  }
   state_cache_.clear();
-  for (size_t i = 0; i < v.size(); i++)
-    delete[] reinterpret_cast<const char*>(v[i]);
 }
 
 // Copies insts in state s to the work queue q.
@@ -1716,7 +1692,7 @@ bool DFA::AnalyzeSearchHelper(SearchParams* params, StartInfo* info,
     State* s = RunStateOnByte(info->start, i);
     if (s == NULL) {
       // Synchronize with "quick check" above.
-      info->firstbyte.store(firstbyte, std::memory_order_release);
+      info->firstbyte.store(kFbUnknown, std::memory_order_release);
       return false;
     }
     if (s == info->start)
@@ -1809,15 +1785,19 @@ DFA* Prog::GetDFA(MatchKind kind) {
     return dfa;
 
   // For a forward DFA, half the memory goes to each DFA.
+  // However, if it is a "many match" DFA, then there is
+  // no counterpart with which the memory must be shared.
+  //
   // For a reverse DFA, all the memory goes to the
   // "longest match" DFA, because RE2 never does reverse
   // "first match" searches.
-  int64 m = dfa_mem_/2;
+  int64 m = dfa_mem_;
   if (reversed_) {
-    if (kind == kLongestMatch || kind == kManyMatch)
-      m = dfa_mem_;
-    else
-      m = 0;
+    DCHECK_EQ(kind, kLongestMatch);
+  } else if (kind == kFirstMatch || kind == kLongestMatch) {
+    m /= 2;
+  } else {
+    DCHECK_EQ(kind, kManyMatch);
   }
   dfa = new DFA(this, kind, m);
 

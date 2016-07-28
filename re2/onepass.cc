@@ -131,7 +131,7 @@ static const int Debug = 0;
 // the memory footprint.)
 struct OneState {
   uint32 matchcond;   // conditions to match right now.
-  uint32 action[1];
+  uint32 action[];
 };
 
 // The uint32 conditions in the action are a combination of
@@ -191,13 +191,10 @@ static void ApplyCaptures(uint32 cond, const char* p,
       cap[i] = p;
 }
 
-// Compute a node pointer.
-// Basically (OneState*)(nodes + statesize*nodeindex)
-// but the version with the C++ casts overflows 80 characters (and is ugly).
-static inline OneState* IndexToNode(volatile uint8* nodes, int statesize,
+// Computes the OneState* for the given nodeindex.
+static inline OneState* IndexToNode(uint8* nodes, int statesize,
                                     int nodeindex) {
-  return reinterpret_cast<OneState*>(
-    const_cast<uint8*>(nodes + statesize*nodeindex));
+  return reinterpret_cast<OneState*>(nodes + statesize*nodeindex);
 }
 
 bool Prog::SearchOnePass(const StringPiece& text,
@@ -233,13 +230,10 @@ bool Prog::SearchOnePass(const StringPiece& text,
   if (anchor_end())
     kind = kFullMatch;
 
-  // State and act are marked volatile to
-  // keep the compiler from re-ordering the
-  // memory accesses walking over the NFA.
-  // This is worth about 5%.
-  volatile OneState* state = onepass_start_;
-  volatile uint8* nodes = onepass_nodes_;
-  volatile uint32 statesize = onepass_statesize_;
+  uint8* nodes = onepass_nodes_;
+  int statesize = sizeof(OneState) + bytemap_range()*sizeof(uint32);
+  // start() is always mapped to the zeroth OneState.
+  OneState* state = IndexToNode(nodes, statesize, 0);
   uint8* bytemap = bytemap_;
   const char* bp = text.begin();
   const char* ep = text.end();
@@ -374,7 +368,7 @@ struct InstCond {
 // Constructs and saves corresponding one-pass NFA on success.
 bool Prog::IsOnePass() {
   if (did_onepass_)
-    return onepass_start_ != NULL;
+    return onepass_nodes_ != NULL;
   did_onepass_ = true;
 
   if (start() == 0)  // no match
@@ -385,7 +379,7 @@ bool Prog::IsOnePass() {
   // Limit max node count to 65000 as a conservative estimate to
   // avoid overflowing 16-bit node index in encoding.
   int maxnodes = 2 + inst_count(kInstByteRange);
-  int statesize = sizeof(OneState) + (bytemap_range_-1)*sizeof(uint32);
+  int statesize = sizeof(OneState) + bytemap_range()*sizeof(uint32);
   if (maxnodes >= 65000 || dfa_mem_ / 4 / statesize < maxnodes)
     return false;
 
@@ -401,18 +395,20 @@ bool Prog::IsOnePass() {
   int* nodebyid = new int[size];  // indexed by ip
   memset(nodebyid, 0xFF, size*sizeof nodebyid[0]);
 
-  uint8* nodes = new uint8[maxnodes*statesize];
-  uint8* nodep = nodes;
+  // Originally, nodes was a uint8[maxnodes*statesize], but that was
+  // unnecessarily optimistic: why allocate a large amount of memory
+  // upfront for a large program when it is unlikely to be one-pass?
+  vector<uint8> nodes;
 
   Instq tovisit(size), workq(size);
   AddQ(&tovisit, start());
   nodebyid[start()] = 0;
-  nodep += statesize;
   int nalloc = 1;
+  nodes.insert(nodes.end(), statesize, 0);
   for (Instq::iterator it = tovisit.begin(); it != tovisit.end(); ++it) {
     int id = *it;
     int nodeindex = nodebyid[id];
-    OneState* node = IndexToNode(nodes, statesize, nodeindex);
+    OneState* node = IndexToNode(nodes.data(), statesize, nodeindex);
 
     // Flood graph using manual stack, filling in actions as found.
     // Default is none.
@@ -452,14 +448,16 @@ bool Prog::IsOnePass() {
             if (nalloc >= maxnodes) {
               if (Debug)
                 LOG(ERROR) << StringPrintf(
-                    "Not OnePass: hit node limit %d > %d", nalloc, maxnodes);
+                    "Not OnePass: hit node limit %d >= %d", nalloc, maxnodes);
               goto fail;
             }
             nextindex = nalloc;
-            nodep += statesize;
-            nodebyid[ip->out()] = nextindex;
-            nalloc++;
             AddQ(&tovisit, ip->out());
+            nodebyid[ip->out()] = nalloc;
+            nalloc++;
+            nodes.insert(nodes.end(), statesize, 0);
+            // Update node because it might have been invalidated.
+            node = IndexToNode(nodes.data(), statesize, nodeindex);
           }
           for (int c = ip->lo(); c <= ip->hi(); c++) {
             int b = bytemap_[c];
@@ -587,7 +585,7 @@ bool Prog::IsOnePass() {
       int nodeindex = nodebyid[id];
       if (nodeindex == -1)
         continue;
-      OneState* node = IndexToNode(nodes, statesize, nodeindex);
+      OneState* node = IndexToNode(nodes.data(), statesize, nodeindex);
       StringAppendF(&dump, "node %d id=%d: matchcond=%#x\n",
                     nodeindex, id, node->matchcond);
       for (int i = 0; i < bytemap_range_; i++) {
@@ -602,16 +600,9 @@ bool Prog::IsOnePass() {
     LOG(ERROR) << "nodes:\n" << dump;
   }
 
-  // Overallocated earlier; cut down to actual size.
-  nodep = new uint8[nalloc*statesize];
-  memmove(nodep, nodes, nalloc*statesize);
-  delete[] nodes;
-  nodes = nodep;
-
-  onepass_start_ = IndexToNode(nodes, statesize, nodebyid[start()]);
-  onepass_nodes_ = nodes;
-  onepass_statesize_ = statesize;
   dfa_mem_ -= nalloc*statesize;
+  onepass_nodes_ = new uint8[nalloc*statesize];
+  memmove(onepass_nodes_, nodes.data(), nalloc*statesize);
 
   delete[] stack;
   delete[] nodebyid;
@@ -620,7 +611,6 @@ bool Prog::IsOnePass() {
 fail:
   delete[] stack;
   delete[] nodebyid;
-  delete[] nodes;
   return false;
 }
 

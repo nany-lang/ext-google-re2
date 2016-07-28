@@ -36,7 +36,7 @@ if(USEPCRE)
   list(APPEND EXTRA_TARGET_LINK_LIBRARIES pcre)
 endif()
 
-include_directories(${CMAKE_SOURCE_DIR})
+include_directories(${CMAKE_CURRENT_LIST_DIR})
 
 set(RE2_LIBRARY_SOURCES
     re2/bitstate.cc
@@ -69,6 +69,7 @@ set(RE2_LIBRARY_SOURCES
 
 add_library(re2 ${RE2_LIBRARY_SOURCES})
 
+if(FALSE)
 set(TEST_LIBRARY_SOURCES
     re2/testing/backtrack.cc
     re2/testing/dump.cc
@@ -122,3 +123,4 @@ foreach(target ${BENCHMARK_TARGETS})
   add_executable(${target} re2/testing/${target}.cc)
   target_link_libraries(${target} benchmark re2 ${EXTRA_TARGET_LINK_LIBRARIES})
 endforeach(target)
+endif()
